@@ -1,0 +1,36 @@
+# Ejecutables y archivos binarios
+programa
+*.exe
+*.out
+*.o
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Archivos de datos generados por las pruebas
+tiempos.csv
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+
+# Carpetas de documentación generadas por Doxygen
+html/
+latex/
+
+
+# Configuraciones de editores y sistema operativo
+.DS_Store
+Thumbs.db
+.vscode/
