@@ -9,7 +9,7 @@ programa
 *.hex
 
 # Archivos de datos generados por las pruebas
-tiempos.csv
+
 
 # Libraries
 *.lib
