@@ -24,6 +24,7 @@ int nu_listen(unsigned short port, int backlog)
     if (setsockopt(file_descriptor, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0)
     {
         perror("setsockopt");
+        close(file_descriptor); //cerrar socket si hay un error
         return -1;
     }
 
@@ -63,8 +64,18 @@ int nu_write_all(int file_descriptor, const void* buffer, size_t size)
             perror("write");
             return -1;
         }
+       // Evita quedarse en un bucle infinito si no se envió ningún byte.
+        if (n == 0)
+        {
+            fprintf(stderr, "send: no se enviaron datos\n");
+            return -1;
+        }
+
+        
         sent += (size_t)n;
     }
+
+    
     return 0;
 }
 
