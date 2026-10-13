@@ -1,0 +1,6 @@
+Mon 12 Oct 2026 10:27:23 PM UTC
+=== make test-race RACE_NX=512 RACE_STEPS=300 RACE_RUNS=20 ===
+cc -std=c17 -Wall -Wextra -pedantic -O2 -pthread -DSIN_BARRERA -Iincludes tests/test_determinism.c src/fdtd_solver.c src/barrier.c -lm -o build/test_determinism_race
+SIN_BARRERA: 20 de 20 ejecuciones detectaron diferencias
+OK: la prueba de determinismo detecta la carrera
+=== fin ===

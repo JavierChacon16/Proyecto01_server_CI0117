@@ -1,0 +1,24 @@
+Mon 12 Oct 2026 10:23:49 PM UTC
+=== make test ===
+build/test_barrier
+OK: barrera reutilizable, 8 hilos x 1000 rondas
+build/test_fdtd
+OK: a mano: 1 paso deja solo ricker(0) en la fuente
+OK: referencia serial 8x8, 5 pasos, 1 hilo
+OK: referencia serial 8x8, 5 pasos, 4 hilos
+OK: referencia serial 8x8, 5 pasos, 6 hilos (=nx-2)
+OK: referencia serial 61x61, 120 pasos, 4 hilos
+OK: filas no divisibles (61/4, 61/7, 10/8, 13/11, 17/3)
+OK: simetria (ejes y diagonal), 1 hilo
+OK: simetria (ejes y diagonal), 4 hilos
+OK: bordes PEC en cero (malla 47x53, 3 hilos)
+OK: parametros invalidos rechazados
+OK: callbacks step/snapshot (4 hilos)
+OK: estadisticas de tiempo (stats_out)
+OK: pruebas del nucleo FDTD
+build/test_determinism
+OK: 2 hilo(s) identico a 1 hilo; suma=3.8005065401e+01
+OK: 3 hilo(s) identico a 1 hilo; suma=3.8005065401e+01
+OK: 4 hilo(s) identico a 1 hilo; suma=3.8005065401e+01
+OK: 8 hilo(s) identico a 1 hilo; suma=3.8005065401e+01
+=== fin ===
