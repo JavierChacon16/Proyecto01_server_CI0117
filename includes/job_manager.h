@@ -33,6 +33,7 @@ int enviar_trabajo(job_t *trabajo);
 
 /* Actualizar el estado y progreso */
 void actualizar_estado(unsigned long id, job_state_t estado);
+void actualizar_tiempo(unsigned long id, double segundos);
 void actualizar_progreso(unsigned long id, int paso);
 void actualizar_resultado(unsigned long id,
                           double resultado,
