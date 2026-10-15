@@ -12,6 +12,9 @@ int agregar_cola(const job_t *trabajo);
 /* Saca el siguiente trabajo de la cola */
 int sacar_cola(job_t *trabajo);
 
+/* Obtener la posicion de un trabajo en la cola */
+int posicion_cola(unsigned long id);
+
 /* Cierra la cola y despierta a los hilos en espera */
 void cerrar_cola(void);
 
