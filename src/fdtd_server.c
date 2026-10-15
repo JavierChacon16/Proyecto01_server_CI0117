@@ -315,6 +315,7 @@ if (iniciar_despachador() != 0) {
 listen_fd = socket(AF_INET, SOCK_STREAM, 0);
 if (listen_fd < 0) {
     perror("socket");
+    apagar_sistema();
     return EXIT_FAILURE;
 }
 
@@ -330,12 +331,14 @@ address.sin_port = htons(port);
 if (bind(listen_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
     perror("bind");
     close(listen_fd);
+    apagar_sistema();
     return EXIT_FAILURE;
 }
 
 if (listen(listen_fd, LISTEN_BACKLOG) < 0) {
     perror("listen");
     close(listen_fd);
+    apagar_sistema();
     return EXIT_FAILURE;
 }
 
