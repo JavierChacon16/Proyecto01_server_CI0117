@@ -184,13 +184,43 @@ if (request.type == CMD_SUBMIT) {
 }
 
 
+
 if (request.type == CMD_STATUS) {
-    
-        // Consultar estado real en el gestor de tareas.
-    
-    protocol_format_running(response, sizeof(response), 0, request.data.status.id);
+
+    datos_trabajo_t datos;
+    unsigned long id = (unsigned long)request.data.status.id;
+
+    if (consultar_estado(id, &datos) != 0) {
+        protocol_format_error(response, sizeof(response),
+                              "trabajo_no_encontrado");
+    }
+    else if (datos.estado == JOB_QUEUED) {
+        int posicion = posicion_cola(id);
+
+        if (posicion > 0) {
+            protocol_format_queued(response, sizeof(response),
+                                   posicion);
+        } else {
+            protocol_format_queued(response, sizeof(response), 1);
+        }
+    }
+    else if (datos.estado == JOB_RUNNING) {
+        protocol_format_running(response, sizeof(response),
+                                datos.paso_actual,
+                                datos.pasos_total);
+    }
+    else if (datos.estado == JOB_DONE) {
+        protocol_format_done(response, sizeof(response),
+                             datos.segundos);
+    }
+    else {
+        protocol_format_error(response, sizeof(response),
+                              "error_simulacion");
+    }
+
     return send_response(fd, response);
 }
+
 
 if (request.type == CMD_PEEK) {
     
