@@ -398,6 +398,9 @@ struct timespec espera = {0, 100000000L}; // 100 ms
         nanosleep(&espera, NULL);
     }
 
+/* Finalizar los modulos concurrentes */
+apagar_sistema();
+
 printf("\nConexiones aceptadas: %lu\n", accepted_connections);
 printf("Conexiones atendidas: %lu\n", served_connections);
 printf("Servidor cerrado.\n");
