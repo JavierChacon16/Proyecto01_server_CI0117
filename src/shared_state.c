@@ -1,3 +1,4 @@
+
 #include "shared_state.h"
 
 #include <pthread.h>
@@ -6,6 +7,7 @@
 #include <stdint.h>
 
 static double *valores_ez = NULL;
+static unsigned long id_trabajo = 0;
 static int filas = 0;
 static int columnas = 0;
 static int paso_publicado = 0;
@@ -21,7 +23,7 @@ static void preparar_candado(void)
 }
 
 /* Preparar la matriz de una simulacion */
-int inicializar_estado_compartido(int nx, int ny)
+int inicializar_estado_compartido(unsigned long id, int nx, int ny)
 {
     if (nx <= 0 || ny <= 0)
         return -1;
@@ -46,6 +48,7 @@ int inicializar_estado_compartido(int nx, int ny)
     free(valores_ez);
     valores_ez = nuevos;
 
+    id_trabajo = id;
     filas = nx;
     columnas = ny;
     paso_publicado = 0;
@@ -67,6 +70,7 @@ void publicar_estado(int paso, const double *ez, int n)
     bloquear_escritura(&candado);
 
     if (valores_ez != NULL &&
+        n > 0 &&
         (size_t)n == (size_t)filas * (size_t)columnas) {
 
         memcpy(valores_ez, ez,
@@ -80,7 +84,8 @@ void publicar_estado(int paso, const double *ez, int n)
 }
 
 /* Consultar una celda para PEEK */
-int consultar_valor(int i, int j, int *paso, double *valor)
+int consultar_valor(unsigned long id, int i, int j,
+                   int *paso, double *valor)
 {
     if (paso == NULL || valor == NULL)
         return -1;
@@ -90,6 +95,7 @@ int consultar_valor(int i, int j, int *paso, double *valor)
     bloquear_lectura(&candado);
 
     if (valores_ez == NULL || !hay_datos ||
+        id_trabajo != id ||
         i < 0 || i >= filas ||
         j < 0 || j >= columnas) {
 
@@ -115,6 +121,7 @@ void destruir_estado_compartido(void)
     free(valores_ez);
     valores_ez = NULL;
 
+    id_trabajo = 0;
     filas = 0;
     columnas = 0;
     paso_publicado = 0;
