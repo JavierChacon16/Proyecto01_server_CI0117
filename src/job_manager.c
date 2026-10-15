@@ -1,4 +1,6 @@
 #include "job_manager.h"
+#include <limits.h>
+#include "queue.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -8,6 +10,7 @@ static datos_trabajo_t *trabajos = NULL;
 static int cantidad = 0;
 static int capacidad = 0;
 static int inicializado = 0;
+static unsigned long siguiente_id = 1;
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -45,6 +48,7 @@ int inicializar_trabajos(int capacidad_inicial)
 
     capacidad = capacidad_inicial;
     cantidad = 0;
+    siguiente_id = 1;
     inicializado = 1;
 
     pthread_mutex_unlock(&mutex);
@@ -105,6 +109,72 @@ int registrar_trabajo(const job_t *trabajo)
     pthread_mutex_unlock(&mutex);
     return 0;
 }
+
+
+/* Registrar y agregar una simulacion a la cola */
+int enviar_trabajo(job_t *trabajo)
+{
+    if (trabajo == NULL)
+        return -2;
+
+    pthread_mutex_lock(&mutex);
+
+    if (!inicializado || siguiente_id > INT_MAX) {
+        pthread_mutex_unlock(&mutex);
+        return -2;
+    }
+
+    /* Preparar espacio para registrar el trabajo */
+    if (cantidad == capacidad) {
+        int nueva_capacidad = capacidad * 2;
+
+        if (nueva_capacidad <= capacidad) {
+            pthread_mutex_unlock(&mutex);
+            return -2;
+        }
+
+        datos_trabajo_t *nuevos = realloc(
+            trabajos,
+            (size_t)nueva_capacidad * sizeof(datos_trabajo_t)
+        );
+
+        if (nuevos == NULL) {
+            pthread_mutex_unlock(&mutex);
+            return -2;
+        }
+
+        trabajos = nuevos;
+        capacidad = nueva_capacidad;
+    }
+
+    trabajo->id = siguiente_id;
+
+    /* Agregar a la cola sin bloquear */
+    int resultado = agregar_cola(trabajo);
+
+    if (resultado != 0) {
+        pthread_mutex_unlock(&mutex);
+        return resultado;
+    }
+
+    /* Registrar el trabajo aceptado */
+    datos_trabajo_t *nuevo = &trabajos[cantidad];
+
+    memset(nuevo, 0, sizeof(datos_trabajo_t));
+
+    nuevo->id = trabajo->id;
+    nuevo->estado = JOB_QUEUED;
+    nuevo->paso_actual = 0;
+    nuevo->pasos_total = trabajo->pasos;
+
+    cantidad++;
+    siguiente_id++;
+
+    pthread_mutex_unlock(&mutex);
+
+    return 0;
+}
+
 
 /* Actualizar el estado de un trabajo */
 void actualizar_estado(unsigned long id, job_state_t estado)
