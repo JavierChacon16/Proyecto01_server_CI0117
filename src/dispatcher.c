@@ -43,12 +43,12 @@ static void *ejecutar_trabajos(void *argumento)
 
         fdtd_grid_t malla;
 
-        /* Preparar el estado para este trabajo */
-        if (inicializar_estado_compartido(
-                trabajo.nx, trabajo.ny) != 0) {
-            actualizar_estado(trabajo.id, JOB_ERROR);
-            continue;
-        }
+      /* Preparar el estado para este trabajo */
+if (inicializar_estado_compartido(
+        trabajo.id, trabajo.nx, trabajo.ny) != 0) {
+    actualizar_estado(trabajo.id, JOB_ERROR);
+    continue;
+}
 
         if (fdtd_init(&malla, trabajo.nx, trabajo.ny) != 0) {
             actualizar_estado(trabajo.id, JOB_ERROR);
