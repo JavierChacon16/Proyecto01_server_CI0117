@@ -189,6 +189,20 @@ void actualizar_estado(unsigned long id, job_state_t estado)
     pthread_mutex_unlock(&mutex);
 }
 
+/* Guardar el tiempo de ejecucion del trabajo */
+void actualizar_tiempo(unsigned long id, double segundos)
+{
+    pthread_mutex_lock(&mutex);
+
+    int posicion = buscar_trabajo(id);
+
+    if (posicion != -1) {
+        trabajos[posicion].segundos = segundos;
+    }
+
+    pthread_mutex_unlock(&mutex);
+}
+
 /* Actualizar el progreso */
 void actualizar_progreso(unsigned long id, int paso)
 {
