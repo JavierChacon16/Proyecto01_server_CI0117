@@ -11,6 +11,11 @@
 #include <unistd.h>
 #include <time.h>
 #include "../includes/protocolo.h"
+#include "../includes/job_manager.h"
+#include "../includes/queue.h"
+#include "../includes/dispatcher.h"
+#include "../includes/snapshot.h"
+#include "../includes/system.h"
 
 
 #define _POSIX_C_SOURCE 200809L
