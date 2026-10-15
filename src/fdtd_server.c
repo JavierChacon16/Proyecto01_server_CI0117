@@ -154,16 +154,35 @@ if (protocol_parse_request(line, &request) != 0) {
     return send_response(fd, response);
 }
 
+
 if (request.type == CMD_SUBMIT) {
-   //
 
-// integrar
+    job_t trabajo = {
+        .id = 0,
+        .nx = request.data.submit.nx,
+        .ny = request.data.submit.ny,
+        .pasos = request.data.submit.pasos,
+        .hilos = request.data.submit.hilos,
+        .k = request.data.submit.k,
+        .sx = request.data.submit.sx,
+        .sy = request.data.submit.sy
+    };
 
-   //
-int sim_id = 1; // Stub temporal hasta integrar el módulo 
-protocol_format_ok(response, sizeof(response), sim_id);
-return send_response(fd, response);
+    int resultado = enviar_trabajo(&trabajo);
+
+    if (resultado == 0) {
+        protocol_format_ok(response, sizeof(response),
+                           (int)trabajo.id);
+    } else if (resultado == -1) {
+        protocol_format_busy(response, sizeof(response));
+    } else {
+        protocol_format_error(response, sizeof(response),
+                              "error_trabajo");
+    }
+
+    return send_response(fd, response);
 }
+
 
 if (request.type == CMD_STATUS) {
     
