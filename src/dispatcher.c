@@ -6,6 +6,7 @@
 #include "snapshot.h"
 
 #include <pthread.h>
+#include <time.h>
 
 static pthread_t hilo_despachador;
 static int despachador_iniciado = 0;
@@ -56,6 +57,10 @@ static void *ejecutar_trabajos(void *argumento)
 
         actualizar_estado(trabajo.id, JOB_RUNNING);
 
+      struct timespec inicio_tiempo;
+      struct timespec fin_tiempo;
+
+      clock_gettime(CLOCK_MONOTONIC, &inicio_tiempo);
         int resultado = fdtd_run(
             &malla,
             trabajo.pasos,
@@ -68,6 +73,18 @@ static void *ejecutar_trabajos(void *argumento)
             &trabajo.id,
             NULL
         );
+        
+/* Calcular el tiempo de ejecucion */
+clock_gettime(CLOCK_MONOTONIC, &fin_tiempo);
+
+double segundos =
+    (double)(fin_tiempo.tv_sec - inicio_tiempo.tv_sec) +
+    (double)(fin_tiempo.tv_nsec - inicio_tiempo.tv_nsec)
+    / 1000000000.0;
+
+actualizar_tiempo(trabajo.id, segundos);
+
+        
 
         if (resultado == 0) {
             double suma = fdtd_result(&malla);
