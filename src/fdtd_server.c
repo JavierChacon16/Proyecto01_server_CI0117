@@ -222,13 +222,27 @@ if (request.type == CMD_STATUS) {
 }
 
 
+
 if (request.type == CMD_PEEK) {
-    
-    // Inspeccionar valor de la malla.
-    
-    protocol_format_value(response, sizeof(response), 0, 0.0);
+
+    unsigned long id = (unsigned long)request.data.peek.id;
+    int i = request.data.peek.i;
+    int j = request.data.peek.j;
+
+    int paso;
+    double valor;
+
+    if (consultar_valor(id, i, j, &paso, &valor) == 0) {
+        protocol_format_value(response, sizeof(response),
+                              paso, valor);
+    } else {
+        protocol_format_error(response, sizeof(response),
+                              "valor_no_disponible");
+    }
+
     return send_response(fd, response);
 }
+
 
 if (request.type == CMD_RESULT) {
     
