@@ -270,6 +270,48 @@ signal(SIGPIPE, SIG_IGN);
 
 unsigned short port = parse_port(argc, argv);
 
+
+/* Inicializar los modulos concurrentes */
+int capacidad_cola = 10;
+int capacidad_instantaneas = 4;
+
+if (inicializar_trabajos(capacidad_cola) != 0) {
+    fprintf(stderr, "Error al inicializar trabajos\n");
+    return EXIT_FAILURE;
+}
+
+if (inicializar_cola(capacidad_cola) != 0) {
+    fprintf(stderr, "Error al inicializar cola\n");
+    destruir_trabajos();
+    return EXIT_FAILURE;
+}
+
+if (inicializar_instantaneas(capacidad_instantaneas) != 0) {
+    fprintf(stderr, "Error al inicializar instantaneas\n");
+    destruir_cola();
+    destruir_trabajos();
+    return EXIT_FAILURE;
+}
+
+if (iniciar_escritor() != 0) {
+    fprintf(stderr, "Error al iniciar escritor\n");
+    destruir_instantaneas();
+    destruir_cola();
+    destruir_trabajos();
+    return EXIT_FAILURE;
+}
+
+if (iniciar_despachador() != 0) {
+    fprintf(stderr, "Error al iniciar despachador\n");
+    cerrar_instantaneas();
+    detener_escritor();
+    destruir_instantaneas();
+    destruir_cola();
+    destruir_trabajos();
+    return EXIT_FAILURE;
+}
+
+
 listen_fd = socket(AF_INET, SOCK_STREAM, 0);
 if (listen_fd < 0) {
     perror("socket");
