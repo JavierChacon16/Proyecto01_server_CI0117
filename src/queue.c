@@ -172,3 +172,28 @@ void destruir_cola(void)
     pthread_mutex_unlock(&mutex);
 }
 
+
+/* Consultar la posicion de un trabajo pendiente */
+int posicion_cola(unsigned long id)
+{
+    pthread_mutex_lock(&mutex);
+
+    if (!inicializada) {
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+
+    for (int i = 0; i < cantidad; i++) {
+        int posicion = (inicio + i) % capacidad;
+
+        if (trabajos[posicion].id == id) {
+            pthread_mutex_unlock(&mutex);
+            return i + 1;
+        }
+    }
+
+    pthread_mutex_unlock(&mutex);
+    return -1;
+}
+
+
