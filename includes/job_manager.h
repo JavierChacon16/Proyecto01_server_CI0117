@@ -17,6 +17,7 @@ typedef struct {
     int paso_actual;
     int pasos_total;
     double resultado;
+    double segundos;
     char archivo[128];
 } datos_trabajo_t;
 
