@@ -27,6 +27,9 @@ void destruir_trabajos(void);
 /* Registrar un nuevo trabajo */
 int registrar_trabajo(const job_t *trabajo);
 
+/* Registrar y encolar un trabajo con identificador unico */
+int enviar_trabajo(job_t *trabajo);
+
 /* Actualizar el estado y progreso */
 void actualizar_estado(unsigned long id, job_state_t estado);
 void actualizar_progreso(unsigned long id, int paso);
