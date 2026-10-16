@@ -1,4 +1,5 @@
 
+
 #ifndef SNAPSHOT_H
 #define SNAPSHOT_H
 
@@ -26,6 +27,9 @@ int sacar_instantanea(snapshot_t *salida);
 /* Iniciar el hilo que escribe los archivos */
 int iniciar_escritor(void);
 
+/* Esperar hasta que el archivo del paso indicado se haya escrito */
+int esperar_instantanea(unsigned long id_trabajo, int paso);
+
 /* Cerrar el bufer */
 void cerrar_instantaneas(void);
 
@@ -34,5 +38,8 @@ void detener_escritor(void);
 
 /* Liberar los recursos */
 void destruir_instantaneas(void);
+
+#endif
+
 
 #endif
