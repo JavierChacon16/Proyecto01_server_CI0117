@@ -41,5 +41,3 @@ void destruir_instantaneas(void);
 
 #endif
 
-
-#endif
