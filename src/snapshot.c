@@ -1,3 +1,4 @@
+
 #include "snapshot.h"
 
 #include <errno.h>
@@ -26,9 +27,14 @@ static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static sem_t espacios;
 static sem_t disponibles;
 
+static pthread_cond_t escritura_terminada = PTHREAD_COND_INITIALIZER;
+
+static unsigned long ultimo_id_escrito = 0;
+static int ultimo_paso_escrito = -1;
+static int error_en_trabajo = 0;
 
 /* Guardar una instantanea en formato binario */
-static void guardar_instantanea(const snapshot_t *dato)
+static int guardar_instantanea(const snapshot_t *dato)
 {
     char nombre[128];
 
@@ -40,7 +46,7 @@ static void guardar_instantanea(const snapshot_t *dato)
 
     if (archivo == NULL) {
         perror("Error al abrir instantanea");
-        return;
+        return -1;
     }
 
     int32_t encabezado[3] = {
@@ -62,6 +68,8 @@ static void guardar_instantanea(const snapshot_t *dato)
         fprintf(stderr, "Error al guardar %s\n", nombre);
         remove(nombre);
     }
+
+    return correcto ? 0 : -1;
 }
 
 /* Funcion del hilo escritor */
@@ -72,11 +80,60 @@ static void *escribir_instantaneas(void *argumento)
     snapshot_t dato;
 
     while (sacar_instantanea(&dato) == 0) {
-        guardar_instantanea(&dato);
+        int resultado = guardar_instantanea(&dato);
+
+        pthread_mutex_lock(&mutex);
+
+        if (ultimo_id_escrito != dato.id_trabajo) {
+            ultimo_id_escrito = dato.id_trabajo;
+            ultimo_paso_escrito = -1;
+            error_en_trabajo = 0;
+        }
+
+        if (resultado != 0)
+            error_en_trabajo = 1;
+
+        ultimo_paso_escrito = dato.paso;
+
+        pthread_cond_broadcast(&escritura_terminada);
+
+        pthread_mutex_unlock(&mutex);
+
         free(dato.ez);
     }
 
     return NULL;
+}
+
+/* Esperar el archivo final del trabajo */
+int esperar_instantanea(unsigned long id_trabajo, int paso)
+{
+    pthread_mutex_lock(&mutex);
+
+    if (!inicializada || !escritor_iniciado) {
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+
+    while (ultimo_id_escrito < id_trabajo ||
+           (ultimo_id_escrito == id_trabajo &&
+            ultimo_paso_escrito < paso)) {
+
+        if (cerrada) {
+            pthread_mutex_unlock(&mutex);
+            return -1;
+        }
+
+        pthread_cond_wait(&escritura_terminada, &mutex);
+    }
+
+    int resultado =
+        (ultimo_id_escrito == id_trabajo && !error_en_trabajo)
+        ? 0 : -1;
+
+    pthread_mutex_unlock(&mutex);
+
+    return resultado;
 }
 
 /* Inicializar el bufer */
@@ -125,6 +182,9 @@ int inicializar_instantaneas(int capacidad_nueva)
     productores_esperando = 0;
     consumidores_esperando = 0;
     escritor_iniciado = 0;
+    ultimo_id_escrito = 0;
+    ultimo_paso_escrito = -1;
+    error_en_trabajo = 0;
 
     pthread_mutex_unlock(&mutex);
 
@@ -170,10 +230,15 @@ int agregar_instantanea(unsigned long id_trabajo,
         return -1;
     }
 
+    if ((size_t)nx > SIZE_MAX / (size_t)ny) {
+        sem_post(&espacios);
+        pthread_mutex_unlock(&mutex);
+        return -2;
+    }
+
     size_t total = (size_t)nx * (size_t)ny;
 
-    if ((size_t)nx > SIZE_MAX / (size_t)ny ||
-        total > SIZE_MAX / sizeof(double)) {
+    if (total > SIZE_MAX / sizeof(double)) {
         sem_post(&espacios);
         pthread_mutex_unlock(&mutex);
         return -2;
@@ -293,6 +358,8 @@ void cerrar_instantaneas(void)
 
         for (int i = 0; i < consumidores_esperando; i++)
             sem_post(&disponibles);
+
+        pthread_cond_broadcast(&escritura_terminada);
     }
 
     pthread_mutex_unlock(&mutex);
@@ -346,3 +413,4 @@ void destruir_instantaneas(void)
 
     pthread_mutex_unlock(&mutex);
 }
+
