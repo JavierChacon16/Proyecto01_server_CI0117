@@ -89,6 +89,22 @@ actualizar_tiempo(trabajo.id, segundos);
         if (resultado == 0) {
             double suma = fdtd_result(&malla);
 
+            /* Solicitar la instantanea final si aun no se genero */
+    if (trabajo.k == 0 ||
+        trabajo.pasos % trabajo.k != 0) {
+
+        if (agregar_instantanea(
+                trabajo.id,
+                trabajo.pasos,
+                malla.Ez,
+                trabajo.nx,
+                trabajo.ny) != 0) {
+            actualizar_estado(trabajo.id, JOB_ERROR);
+            fdtd_free(&malla);
+            continue;
+        }
+    }
+
             actualizar_resultado(trabajo.id, suma, NULL);
             actualizar_estado(trabajo.id, JOB_DONE);
         } else {
