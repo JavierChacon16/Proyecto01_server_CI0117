@@ -1,3 +1,4 @@
+
 #include "dispatcher.h"
 #include "queue.h"
 #include "job_manager.h"
@@ -7,6 +8,12 @@
 
 #include <pthread.h>
 #include <time.h>
+#include <stdio.h>
+
+typedef struct {
+    unsigned long id;
+    int error_instantanea;
+} contexto_trabajo_t;
 
 static pthread_t hilo_despachador;
 static int despachador_iniciado = 0;
@@ -16,8 +23,8 @@ static void informar_progreso(int paso, int total, void *contexto)
 {
     (void)total;
 
-    unsigned long id = *(unsigned long *)contexto;
-    actualizar_progreso(id, paso);
+    contexto_trabajo_t *datos = contexto;
+    actualizar_progreso(datos->id, paso);
 }
 
 /* Publicar la matriz Ez y guardar la instantanea */
@@ -26,10 +33,12 @@ static void informar_instantanea(const double *ez,
                                 int paso,
                                 void *contexto)
 {
-    unsigned long id = *(unsigned long *)contexto;
+    contexto_trabajo_t *datos = contexto;
 
     publicar_estado(paso, ez, nx * ny);
-    agregar_instantanea(id, paso, ez, nx, ny);
+
+    if (agregar_instantanea(datos->id, paso, ez, nx, ny) != 0)
+        datos->error_instantanea = 1;
 }
 
 /* Ejecutar los trabajos pendientes */
@@ -43,12 +52,12 @@ static void *ejecutar_trabajos(void *argumento)
 
         fdtd_grid_t malla;
 
-      /* Preparar el estado para este trabajo */
-if (inicializar_estado_compartido(
-        trabajo.id, trabajo.nx, trabajo.ny) != 0) {
-    actualizar_estado(trabajo.id, JOB_ERROR);
-    continue;
-}
+        /* Preparar el estado para este trabajo */
+        if (inicializar_estado_compartido(
+                trabajo.id, trabajo.nx, trabajo.ny) != 0) {
+            actualizar_estado(trabajo.id, JOB_ERROR);
+            continue;
+        }
 
         if (fdtd_init(&malla, trabajo.nx, trabajo.ny) != 0) {
             actualizar_estado(trabajo.id, JOB_ERROR);
@@ -57,10 +66,13 @@ if (inicializar_estado_compartido(
 
         actualizar_estado(trabajo.id, JOB_RUNNING);
 
-      struct timespec inicio_tiempo;
-      struct timespec fin_tiempo;
+        contexto_trabajo_t contexto = {trabajo.id, 0};
 
-      clock_gettime(CLOCK_MONOTONIC, &inicio_tiempo);
+        struct timespec inicio_tiempo;
+        struct timespec fin_tiempo;
+
+        clock_gettime(CLOCK_MONOTONIC, &inicio_tiempo);
+
         int resultado = fdtd_run(
             &malla,
             trabajo.pasos,
@@ -70,43 +82,52 @@ if (inicializar_estado_compartido(
             trabajo.k,
             informar_progreso,
             informar_instantanea,
-            &trabajo.id,
+            &contexto,
             NULL
         );
-        
-/* Calcular el tiempo de ejecucion */
-clock_gettime(CLOCK_MONOTONIC, &fin_tiempo);
 
-double segundos =
-    (double)(fin_tiempo.tv_sec - inicio_tiempo.tv_sec) +
-    (double)(fin_tiempo.tv_nsec - inicio_tiempo.tv_nsec)
-    / 1000000000.0;
+        clock_gettime(CLOCK_MONOTONIC, &fin_tiempo);
 
-actualizar_tiempo(trabajo.id, segundos);
+        double segundos =
+            (double)(fin_tiempo.tv_sec - inicio_tiempo.tv_sec) +
+            (double)(fin_tiempo.tv_nsec - inicio_tiempo.tv_nsec)
+            / 1000000000.0;
 
-        
+        actualizar_tiempo(trabajo.id, segundos);
 
-        if (resultado == 0) {
+        if (resultado == 0 && !contexto.error_instantanea) {
             double suma = fdtd_result(&malla);
 
-            /* Solicitar la instantanea final si aun no se genero */
-    if (trabajo.k == 0 ||
-        trabajo.pasos % trabajo.k != 0) {
+            /* Guardar el ultimo paso cuando k no lo incluye */
+            if ((trabajo.k == 0 ||
+                 trabajo.pasos % trabajo.k != 0) &&
+                agregar_instantanea(
+                    trabajo.id,
+                    trabajo.pasos,
+                    malla.Ez,
+                    trabajo.nx,
+                    trabajo.ny) != 0) {
 
-        if (agregar_instantanea(
-                trabajo.id,
-                trabajo.pasos,
-                malla.Ez,
-                trabajo.nx,
-                trabajo.ny) != 0) {
-            actualizar_estado(trabajo.id, JOB_ERROR);
-            fdtd_free(&malla);
-            continue;
-        }
-    }
+                contexto.error_instantanea = 1;
+            }
 
-            actualizar_resultado(trabajo.id, suma, NULL);
-            actualizar_estado(trabajo.id, JOB_DONE);
+            if (!contexto.error_instantanea &&
+                esperar_instantanea(
+                    trabajo.id, trabajo.pasos) == 0) {
+
+                char archivo[128];
+
+                snprintf(archivo, sizeof(archivo),
+                         "job%lu_step%d.bin",
+                         trabajo.id, trabajo.pasos);
+
+                actualizar_resultado(trabajo.id, suma, archivo);
+                actualizar_estado(trabajo.id, JOB_DONE);
+
+            } else {
+                actualizar_estado(trabajo.id, JOB_ERROR);
+            }
+
         } else {
             actualizar_estado(trabajo.id, JOB_ERROR);
         }
@@ -146,3 +167,4 @@ void detener_despachador(void)
 
     despachador_iniciado = 0;
 }
+
