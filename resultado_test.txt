@@ -1,0 +1,55 @@
+--- Comandos validos ---
+[OK]    SUBMIT valido
+[OK]    SUBMIT con k = 0 (sin instantaneas)
+[OK]    SUBMIT con salto de linea
+[OK]    STATUS valido
+[OK]    PEEK valido
+[OK]    RESULT valido
+[OK]    SHUTDOWN valido
+
+--- Comandos invalidos ---
+[OK]    linea vacia
+[OK]    comando desconocido
+[OK]    STATUS sin id
+[OK]    STATUS con letras
+[OK]    STATUS con id negativo
+[OK]    STATUS con argumento de mas
+[OK]    PEEK sin una coordenada
+[OK]    RESULT sin id
+[OK]    SHUTDOWN con argumento de mas
+[OK]    SUBMIT con un parametro menos
+[OK]    SUBMIT con un parametro de mas
+[OK]    SUBMIT con numero mal escrito
+
+--- Validacion de SUBMIT ---
+[OK]    nx = 0
+[OK]    nx negativo
+[OK]    ny = 0
+[OK]    pasos = 0
+[OK]    hilos = 0
+[OK]    hilos mayor que nx - 2
+[OK]    hilos igual a nx - 2
+[OK]    k negativo
+[OK]    sx fuera de la malla
+[OK]    sy fuera de la malla
+[OK]    sx en el borde
+
+--- Datos guardados ---
+[OK]    SUBMIT guarda sus 7 valores
+[OK]    STATUS guarda el id
+[OK]    PEEK guarda id, i y j
+[OK]    RESULT guarda el id
+[OK]    SHUTDOWN guarda el tipo
+
+--- Formato de respuestas ---
+[OK]    OK
+[OK]    BUSY
+[OK]    ERROR
+[OK]    QUEUED
+[OK]    RUNNING
+[OK]    DONE
+[OK]    VALUE
+[OK]    RESULT
+[OK]    BYE
+
+Total: 44   Correctas: 44   Fallidas: 0
