@@ -114,6 +114,13 @@ $(BUILD)/test_rwlock: $(TEST_DIR)/test_rwlock.c $(SRC_DIR)/rwlock.c | $(BUILD)
 $(BUILD)/test_snapshot: $(TEST_DIR)/test_snapshot.c $(SRC_DIR)/snapshot.c | $(BUILD)
 	$(CC) $(CFLAGS) -I$(INC_DIR) $^ $(LDLIBS) -o $@
 
+# Prueba de estres e integracion TCP
+$(BUILD)/test_stress: $(TEST_DIR)/test_stress.c | $(BUILD)
+	$(CC) $(CFLAGS) -I$(INC_DIR) $< $(LDFLAGS) -o $@
+
+test-stress: $(BIN)/fdtd_server $(BUILD)/test_stress
+	./$(BUILD)/test_stress
+
 # Ejecutar las pruebas
 test: all $(BUILD)/test_protocolo $(C_TEST_BIN)
 	@set -e; \
