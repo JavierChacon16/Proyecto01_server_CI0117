@@ -1,0 +1,270 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[spanish,es-nodecimaldot]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs,tabularx,array}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{enumitem}
+\hypersetup{colorlinks=true,linkcolor=black,urlcolor=blue}
+\setlength{\parskip}{0.45em}
+\setlength{\parindent}{0pt}
+\renewcommand{\arraystretch}{1.2}
+\graphicspath{{images/}}
+
+\begin{document}
+
+\begin{titlepage}
+\centering
+{\Large UNIVERSIDAD DE COSTA RICA\par}
+\vspace{0.8cm}
+{\large FACULTAD DE INGENIERÍA\par}
+\vspace{0.4cm}
+{\large ESCUELA DE COMPUTACIÓN E INFORMÁTICA\par}
+\vspace{2.0cm}
+{\LARGE\bfseries Primera Entrega Programada\par}
+\vspace{1.5cm}
+\begin{flushleft}
+\textbf{Curso:} Programación Paralela y Concurrente\\[0.3cm]
+\textbf{Sigla:} CI-0117\\[0.3cm]
+\textbf{Profesor:} Ing. Sleyter Angulo, M.Sc.
+\end{flushleft}
+\vspace{0.8cm}
+\textbf{Estudiantes:}
+\begin{itemize}[leftmargin=1.2cm]
+\item Jorge Antonio Durán Chinchilla, C02679.
+\item Kenneth Fabricio Delgado Cárdenas, C22540.
+\item Javier Chacón Rosales, C32052.
+\end{itemize}
+\vfill
+Semestre II\\2026
+\end{titlepage}
+
+\section{Introducción}
+Este proyecto implementa un servidor de red concurrente que recibe solicitudes de simulación electromagnética y las ejecuta utilizando el método FDTD (\textit{Finite-Difference Time-Domain}) en 2D. En la realización del motor de cálculo se paralelizó la malla bidimensional entre varios hilos y se aseguró que las actualizaciones de los campos se hicieran en el orden correcto. El problema principal radica en que cada hilo lee datos de las filas vecinas, lo que exige mecanismos rigurosos de sincronización.
+
+El proyecto abarca desde el núcleo numérico (\textit{solver}, barrera reutilizable, pruebas unitarias y ejecutable \texttt{fdtd\_bench}) hasta la arquitectura de red \textit{thread-per-client}, el análisis del protocolo de texto y la integración con un gestor de trabajos asíncrono. El \textit{solver} no conoce sockets, colas ni archivos; solo calcula y notifica mediante \textit{callbacks}. Esta separación modular permite verificar la exactitud del cálculo, medir el escalamiento del rendimiento y ofrecer una interfaz cliente-servidor tolerante a fallos.
+
+\section{Desarrollo de la solución}
+\subsection{Representación y actualización de los campos}
+Los tres campos residen en arreglos separados de tipo \texttt{double}, porque en la malla de Yee tienen dimensiones distintas: $E_z$ se ubica en los nodos, mientras que $H_x$ y $H_y$ se ubican en los lados. Por ello, $H_x$ tiene $n_y-1$ columnas y $H_y$ posee $n_x-1$ filas. Se utilizó \texttt{calloc} para garantizar que las condiciones iniciales fueran cero.
+
+Las ecuaciones utilizadas para la actualización de las celdas son:
+\begin{align*}
+H_x[m][n] &= H_x[m][n] - \frac{S_c}{\eta_0}\left(E_z[m][n+1]-E_z[m][n]\right),\\[0.4em]
+H_y[m][n] &= H_y[m][n] + \frac{S_c}{\eta_0}\left(E_z[m+1][n]-E_z[m][n]\right),\\[0.4em]
+E_z[m][n] &= E_z[m][n] + \frac{S_c\eta_0}{\varepsilon_r}
+\left((H_y[m][n]-H_y[m-1][n])-(H_x[m][n]-H_x[m][n-1])\right).
+\end{align*}
+\textit{Nota:} ecuaciones de actualización de celdas. Fuente: PDF Project FDTD.
+
+La actualización eléctrica solo recorre las celdas interiores. De este modo, los bordes conservan $E_z=0$, cumpliendo con la condición de frontera de conductor eléctrico perfecto (PEC). Posteriormente, el hilo asignado a la fila correspondiente inyecta la fuente de Ricker en $(s_x,s_y)$.
+
+El orden temporal es crítico: primero se actualiza $H$ y luego $E$. Si se realizaran simultáneamente, $E$ leería valores de $H$ parcialmente actualizados, lo que introduciría condiciones de carrera. Por esta razón, se emplean dos barreras de sincronización por cada paso de tiempo.
+
+\subsection{Distribución de filas}
+Para $T$ hilos, la malla se divide en $T$ bloques contiguos de filas. La asignación es proporcional: cada hilo recibe aproximadamente $n_x/T$ filas. Si $n_x$ no es divisible entre $T$, la carga se distribuye equitativamente, dando una fila adicional a los primeros bloques. Por ejemplo, con 10 filas y 3 hilos, la distribución resulta en bloques de 3, 3 y 4 filas.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{flujo_hilo.png}
+\caption{Flujo del hilo solucionador.}
+\end{figure}
+
+\subsection{Barrera reutilizable}
+La barrera se implementa mediante un \texttt{pthread\_mutex\_t}, un contador de llegadas y dos semáforos POSIX (\texttt{sem\_t}) inicializados en cero. La variable \texttt{phase} alterna entre los semáforos de cada generación.
+
+Cada hilo que llega realiza las siguientes operaciones:
+\begin{enumerate}
+\item Adquiere el mutex, incrementa el contador y libera el mutex.
+\item Si no es el último hilo en llegar, se bloquea en el semáforo correspondiente a la fase actual.
+\item Si es el último hilo, reinicia el contador, cambia la fase y ejecuta \texttt{sem\_post} $T-1$ veces para despertar a los demás hilos.
+\end{enumerate}
+
+Los hilos que esperaban consumen las señales con \texttt{sem\_wait}. En caso de que una señal del sistema interrumpa \texttt{sem\_wait}, una función envolvente reintenta la operación hasta completarla. Si la barrera tiene solo un participante ($T=1$), no realiza esperas.
+
+\textbf{Parte del código de la barrera:}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{codigo_barrera.png}
+\end{figure}
+
+\subsection{Instantáneas, progreso y ciclo de vida}
+Mientras el hilo 0 realiza la copia de $E_z$ para las instantáneas, los demás hilos pueden comenzar a actualizar $H_x$ y $H_y$, ya que ambas tareas leen $E_z$ sin generar conflictos de escritura. Posteriormente, todos los hilos se sincronizan en la primera barrera del siguiente paso.
+
+El \textit{callback} recibe un puntero a $E_z$, el cual solo es válido durante su ejecución. Si un módulo externo requiere conservar la instantánea, debe realizar una copia profunda de los datos antes de que el \textit{callback} retorne.
+
+Las consultas \texttt{STATUS} y \texttt{PEEK} pueden reflejar diferencias de paso, dado que el progreso se actualiza en cada iteración, mientras que la instantánea se toma cada $k$ pasos.
+
+Antes de iniciar el cálculo, los hilos trabajadores esperan una condición de inicio. La función \texttt{fdtd\_run} espera a todos los trabajadores con \texttt{pthread\_join} antes de destruir los recursos. La liberación de memoria de la malla se efectúa con \texttt{fdtd\_free}.
+
+\subsection{Variante sin barreras}
+La opción de compilación \texttt{-DSIN\_BARRERA} deshabilita las esperas en cada paso. Esto permite que un hilo actualice $E_z$ mientras otro lee dicho campo o procesa valores magnéticos obsoletos. La ausencia de barreras genera condiciones de carrera reales que invalidan los resultados. Con las barreras activas, el resultado numérico con $T=1,2,4,8$ debe ser idéntico bit a bit.
+
+\subsection{Tiempo y métricas}
+El ejecutable \texttt{fdtd\_bench} mide intervalos con \texttt{clock\_gettime(CLOCK\_MONOTONIC, ...)} e imprime los resultados en formato CSV. Las métricas reportadas incluyen:
+\begin{itemize}
+\item \texttt{init\_s}: tiempo consumido por \texttt{fdtd\_init}.
+\item \texttt{compute\_s}: promedio del tiempo empleado por hilo en \texttt{update\_h} y \texttt{update\_e}.
+\item \texttt{barrier\_wait\_s}: promedio del tiempo de espera en barreras por hilo.
+\item \texttt{io\_s}: tiempo dedicado por el hilo 0 a la ejecución de \textit{callbacks}.
+\item \texttt{total\_s}: tiempo de pared (\textit{wall-clock time}) desde \texttt{fdtd\_init} hasta \texttt{fdtd\_result}.
+\end{itemize}
+
+\texttt{total\_s} representa la duración real de extremo a extremo, incluyendo inicialización, cómputo, esperas, \textit{callbacks} y obtención de resultados.
+
+\subsection{Arquitectura del servidor de red y protocolo de comunicación}
+Para permitir el acceso remoto al motor de simulación, se implementó un servidor de red concurrente bajo el modelo \textit{Thread-per-Client} en C17 (\texttt{-std=c17 -Wall -Wextra -pedantic -pthread}). El servidor escucha en un puerto TCP configurable (por defecto, 8080) y gestiona las conexiones entrantes mediante sockets.
+
+\begin{enumerate}
+\item \textbf{Control de E/S y señales:} el servidor utiliza \texttt{poll()} con un tiempo de espera de 300 ms en las lecturas de los sockets. Esto evita bloqueos indefinidos y permite monitorear continuamente la variable de control \texttt{running}, modificada de manera atómica ante una señal \texttt{SIGINT} (interrupción por teclado) para iniciar un apagado ordenado.
+\item \textbf{Protocolo de texto formateado:} el módulo \texttt{protocolo.c} analiza las líneas entrantes mediante \texttt{ssize\_t} y valida estrictamente los límites y la cantidad de argumentos. Los comandos soportados son \texttt{SUBMIT}, \texttt{STATUS}, \texttt{PEEK}, \texttt{RESULT} y \texttt{SHUTDOWN}. Las respuestas del servidor siguen un formato estricto terminado en salto de línea (\texttt{\textbackslash n}): \texttt{OK <id>}, \texttt{BUSY}, \texttt{ERROR <motivo>}, \texttt{QUEUED <pos>}, \texttt{RUNNING <paso>/<total>}, \texttt{DONE <segs>}, \texttt{VALUE <paso> <valor>}, \texttt{RESULT <suma> <archivo>} y \texttt{BYE}.
+\item \textbf{Transferencia completa (\texttt{send\_all}):} para evitar escrituras parciales por fragmentación TCP, se implementó la función auxiliar \texttt{send\_all}, que garantiza que todos los bytes de la respuesta se transmitan antes de continuar.
+\item \textbf{Concurrencia por cliente:} cada cliente aceptado por \texttt{accept()} genera un hilo POSIX independiente en modo desacoplado (\texttt{pthread\_detach}). Los contadores de conexiones aceptadas, conexiones atendidas e hilos activos se protegen mediante un \texttt{pthread\_mutex\_t} (\texttt{stats\_mutex}).
+\item \textbf{Cierre ordenado:} al recibir la orden \texttt{SHUTDOWN} o una señal \texttt{SIGINT}, el servidor deja de aceptar nuevas conexiones, cierra el socket de escucha y espera, mediante lecturas no bloqueantes con \texttt{nanosleep}, a que todos los hilos activos de clientes terminen antes de liberar los módulos del sistema y destruir los mutexes.
+\end{enumerate}
+
+\subsection{Gestión concurrente de los trabajos}
+Los trabajos recibidos por el servidor se administran con una cola, un gestor de estados y un despachador. Cada módulo cumple una función durante la ejecución de las simulaciones.
+\begin{itemize}
+\item \textbf{Cola de trabajos (\texttt{queue.c}):} utiliza una estructura circular FIFO con capacidad limitada. Un mutex protege sus operaciones y un semáforo señala la disponibilidad de trabajos. Si la cola está llena, el servidor responde \texttt{BUSY}.
+\item \textbf{Gestor de trabajos (\texttt{job\_manager.c}):} asigna un identificador a cada solicitud y registra su estado (\texttt{QUEUED}, \texttt{RUNNING}, \texttt{DONE} o \texttt{ERROR}), progreso, tiempo y resultado. El acceso a estos datos se protege con un mutex.
+\item \textbf{Despachador (\texttt{dispatcher.c}):} toma los trabajos de la cola, ejecuta el motor FDTD y recibe el progreso mediante \textit{callbacks}.
+\item \textbf{Estado compartido (\texttt{shared\_state.c} y \texttt{rwlock.c}):} conserva la matriz $E_z$ más reciente del trabajo actual. El candado permite varias lecturas simultáneas y acceso exclusivo para actualizar los datos.
+\item \textbf{Instantáneas (\texttt{snapshot.c}):} utiliza un búfer circular limitado y un hilo escritor que guarda los archivos binarios. Los semáforos coordinan los espacios y los datos disponibles. Antes de marcar un trabajo como \texttt{DONE}, se espera la escritura de la instantánea final.
+\item \textbf{Apagado (\texttt{system.c}):} cierra la cola, espera al despachador y al hilo escritor y, luego, libera los recursos.
+\end{itemize}
+
+\section{Pruebas y evidencia local}
+\subsection{Ambiente de pruebas}
+Las pruebas se realizaron en un procesador AMD Ryzen 3 3100 (4 núcleos físicos, 4 hilos visibles y 1 socket) sobre KVM, en un entorno virtualizado. La compilación se efectuó con \texttt{gcc -std=c17 -Wall -Wextra -pedantic -O2 -pthread}, sin generar advertencias ni errores.
+
+\begin{table}[H]
+\centering\scriptsize\sloppy
+\begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{2.2cm}|X|p{1.5cm}|p{1.7cm}|}\hline
+\textbf{Prueba} & \textbf{Caso} & \textbf{Local} & \textbf{ECCI/KABRE}\\\hline
+Barrera & 8 hilos, 1000 rondas & OK & Pendiente\\\hline
+Referencia & $8\times8$, 5 pasos, 1/4/6 hilos & OK & Pendiente\\\hline
+Caso manual & 1 paso; solo la fuente modifica $E_z$ & OK & Pendiente\\\hline
+Reparto irregular & 61/4, 61/7, 10/8, 13/11, 17/3 & OK & Pendiente\\\hline
+Simetría & Ejes y diagonal, 1 y 4 hilos & OK & Pendiente\\\hline
+Bordes PEC & $47\times53$ con 3 hilos, $E_z=0$ & OK & Pendiente\\\hline
+Determinismo & 2/3/4/8 hilos idénticos bit a bit a 1 hilo & -- & Pendiente\\\hline
+Sin barreras & 20 corridas, $512\times512$, 300 pasos & 20/20 fallan & Pendiente\\\hline
+Pruebas de protocolo & Análisis de comandos válidos, inválidos y vacíos & OK & Pendiente\\\hline
+Pruebas del servidor de red & Múltiples clientes concurrentes mediante \texttt{nc}/\texttt{fdtd\_client} & OK & Pendiente\\\hline
+Apagado ordenado & Cierre con \texttt{SHUTDOWN} y \texttt{SIGINT} (Ctrl+C), sin fugas & OK & Pendiente\\\hline
+Cola FIFO & Orden, capacidad, posición y cierre & OK & Pendiente\\\hline
+Gestor de trabajos & Registro, estados, progreso y resultado & OK & Pendiente\\\hline
+Lectores-escritores & Lecturas simultáneas y escritura exclusiva & OK & Pendiente\\\hline
+Instantáneas & Archivo binario, encabezado y valores $E_z$ & OK & Pendiente\\\hline
+\end{tabularx}
+\end{table}
+
+Los registros completos están en \texttt{test\_local.log} y \texttt{test\_race\_local.log}. La prueba de determinismo compara $E_z$, $H_x$ y $H_y$ con \texttt{memcmp}. Con \texttt{-DSIN\_BARRERA}, las 20 ejecuciones detectaron diferencias, lo que evidencia la necesidad de las barreras. El resultado paralelo es igual al serial, salvo por diferencias mínimas de redondeo. La simetría se verifica con una malla cuadrada y una fuente centrada. Los bordes PEC se verifican comprobando que $E_z=0$ en todo el contorno después de la simulación.
+
+\section{Análisis de resultados y rendimiento}
+\subsection{Análisis del rendimiento paralelo}
+La serie principal de pruebas se ejecutó en \texttt{bench\_E1\_1000.csv}, con 5 repeticiones para $T=1,2,4,8$ hilos, sobre una malla de $2048\times2048$ celdas y 1000 pasos de tiempo, sin extracción de instantáneas.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{rrrrrr}\toprule
+$T$ & Mediana (s) & Rango (s) & $S(T)$ & $E(T)$ & $e(T)$\\\midrule
+1 & 21.5706 & 20.4140--24.3467 & 1.000 & 1.000 & --\\
+2 & 17.9586 & 16.8236--19.5935 & 1.201 & 0.601 & 0.666\\
+4 & 17.5525 & 14.4874--19.4869 & 1.229 & 0.307 & 0.752\\
+8 & 16.1455 & 14.5187--19.2256 & 1.336 & 0.167 & 0.712\\\bottomrule
+\end{tabular}
+\end{table}
+
+La mediana se calcula ordenando las cinco observaciones y tomando la del centro. El rango es la diferencia entre el máximo y el mínimo, expresada aquí mediante sus extremos. La aceleración es $S(T)=T(1)/T(T)$, la eficiencia es $E(T)=S(T)/T$ y $e(T)$ es la fracción serial efectiva de Karp--Flatt:
+\[
+e(T)=\frac{1/S(T)-1/T}{1-1/T}.
+\]
+
+\textbf{Variabilidad:} los rangos observados son amplios. Por ejemplo, con $T=4$, el tiempo varía entre 14.48 s y 19.48 s. Esto puede deberse a que las pruebas se ejecutaron sobre una máquina virtual (KVM), donde los cuatro núcleos visibles no son necesariamente exclusivos y el hipervisor puede introducir ruido en las mediciones.
+
+\subsection{Estimación de la fracción paralelizable y ley de Amdahl}
+A partir de la ejecución con un hilo ($T=1$), la mediana de \texttt{compute\_s} fue 21.5634 s y la de \texttt{total\_s} fue 21.5706 s. La fracción paralelizable estimada es:
+\[
+p=\frac{21.5634}{21.5706}\approx 0.9997.
+\]
+Aplicando la ley de Amdahl:
+\[
+S_A(T)=\frac{1}{(1-p)+p/T}.
+\]
+Para $T=4$, Amdahl predice $S(4)\approx3.99$, mientras que el valor medido fue de $1.229$. Para $T=8$, Amdahl predice $7.96$ y se midió $1.336$.
+
+\subsection{Discusión de resultados}
+El mejor tiempo mediano se obtuvo con $T=8$ hilos (16.1455 s), pero la diferencia con $T=4$ (17.5525 s) es pequeña y los rangos se solapan. En general, agregar hilos reduce el tiempo de cómputo, pero no de forma proporcional.
+
+El análisis de las etapas ayuda a explicar este comportamiento. El tiempo de cómputo por hilo disminuyó de 21.563 s ($T=1$) a 7.653 s ($T=8$), lo cual confirma que la paralelización del cálculo funciona. Sin embargo, la espera en barreras se incrementó drásticamente, de 0.0015 s a 8.46 s. A partir de $T=4$, las barreras representan una fracción considerable del tiempo total y absorben parte de los beneficios de la paralelización.
+
+El aumento de la métrica de Karp--Flatt $e(T)$ de 0.666 ($T=2$) a 0.752 ($T=4$) indica que el cuello de botella está relacionado con los sobrecostos de sincronización, la saturación del ancho de banda de memoria y el efecto de sobresuscripción al ejecutar ocho hilos en un entorno de cuatro núcleos físicos.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]{figura_aceleracion.png}
+\caption{E1 ($2048\times2048$, 1000 pasos): aceleración medida frente a la predicha por Amdahl. La línea vertical marca las cuatro CPU visibles.}
+\end{figure}
+
+La eficiencia cae de 1.00 con un hilo a 0.60 con dos, 0.31 con cuatro y 0.17 con ocho. Esto significa que cada hilo adicional aporta menos al rendimiento total, hasta el punto de que, con ocho hilos, cada uno aporta solo el 17\% de lo que aportaba el hilo único.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{figura_eficiencia.png}
+\caption{E1: eficiencia por hilo $E(T)=S(T)/T$.}
+\end{figure}
+
+La fracción serial efectiva de Karp--Flatt crece de 0.666 con dos hilos a 0.752 con cuatro hilos. Si solo hubiera una fracción serial pura, este valor sería constante. Como aumenta, indica que el deterioro no se debe únicamente a la parte serial del algoritmo, sino también a sobrecostos que crecen con el número de hilos: sincronización en barreras, saturación de memoria y sobresuscripción.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{figura_karp_flatt.png}
+\caption{E1: fracción serial efectiva de Karp--Flatt.}
+\end{figure}
+
+
+
+\subsection{Escenario E3: malla pequeña}
+Para contrastar el efecto del tamaño de la malla, se ejecutó el escenario E3 con una malla de $256\times256$ y 1000 pasos de tiempo. Los resultados se muestran a continuación:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{rrrr}\toprule
+$T$ & Mediana (s) & Rango (s) & $S$\\\midrule
+1 & 0.1519 & 0.1458--0.1620 & 1.000\\
+2 & 0.1432 & 0.1229--0.2269 & 1.061\\
+4 & 0.2136 & 0.2049--0.2674 & 0.711\\
+8 & 0.2163 & 0.2124--0.3610 & 0.702\\\bottomrule
+\end{tabular}
+\end{table}
+
+A diferencia de E1, en E3 la paralelización empeora el rendimiento. Con $T=4$ y $T=8$, el tiempo total es mayor que con un solo hilo (aceleración menor que 1). La razón es que, en una malla pequeña, el trabajo por hilo es tan corto que el costo de las dos barreras por paso supera la ganancia del cómputo paralelo. Esto confirma que, sin suficiente trabajo por hilo, las barreras dominan el tiempo de ejecución.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.75\textwidth]{figura_e3.png}
+\caption{E3 ($256\times256$, 1000 pasos): con poco trabajo por hilo, la aceleración medida es menor que 1 a partir de $T=4$.}
+\end{figure}
+
+\section{Conclusiones}
+\begin{enumerate}
+\item Las evaluaciones experimentales confirman el funcionamiento del motor de cálculo FDTD 2D. Se comprobó la equivalencia numérica entre la solución paralela y la referencia serial, la simetría espacial, la preservación de los bordes PEC y el determinismo bit a bit en las ejecuciones multihilo.
+\item Las pruebas con la opción \texttt{-DSIN\_BARRERA} resultaron en un 100\% de fallos numéricos (20 de 20 corridas), lo que evidencia que las barreras de sincronización por fase son necesarias para prevenir condiciones de carrera durante la actualización de los campos magnéticos y eléctricos.
+\item En el escenario E1 (malla grande), la mayor aceleración se alcanzó con $T=8$ hilos ($S=1.336$), aunque quedó muy lejos de la predicción de la ley de Amdahl (7.96). El cuello de botella no es la fracción serial, sino la latencia de sincronización en barreras y la contención en el acceso a memoria, como lo demuestra el comportamiento de la métrica de Karp--Flatt.
+\item En el escenario E3 (malla pequeña), se comprobó que la paralelización puede ser contraproducente. Con $T=4$ y $T=8$, la aceleración fue menor que 1 (0.711 y 0.702). Esto evidencia que el beneficio de paralelizar depende de que exista suficiente trabajo por hilo para amortizar el costo de la sincronización.
+\item El diseño y la implementación de la capa de red bajo el modelo \textit{Thread-per-Client} y el protocolo basado en líneas de texto permiten separar la recepción de comandos de E/S y la ejecución matemática. La utilización de \texttt{poll()} con tiempo de espera, la transmisión completa de respuestas con \texttt{send\_all} y la captura de señales \texttt{SIGINT} contribuyen a un servidor estable, tolerante a errores de sintaxis y capaz de realizar un apagado ordenado sin pérdida de recursos ni fugas de memoria.
+\item La integración del gestor de trabajos, el despachador y el búfer de instantáneas permitió que el servidor organizara las solicitudes y ejecutara las simulaciones de forma ordenada. El uso de mutexes, semáforos y lectores-escritores ayudó a evitar conflictos al trabajar con datos compartidos. Además, las pruebas realizadas permitieron comprobar el funcionamiento de estos módulos en diferentes situaciones.
+\end{enumerate}
+
+\vspace{0.5cm}
+\textbf{Enlace al repositorio:} \url{https://github.com/JavierChacon16/Proyecto01_server_CI0117}
+
+\end{document}
